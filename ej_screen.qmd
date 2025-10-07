@@ -1,0 +1,334 @@
+---
+title: "Environmental Justice Analysis: Superfund Sites and Demographic Vulnerability in New Mexico"
+author: "Garrett Craig"
+date: "`r Sys.Date()`"
+format:
+  pdf:
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    number_sections: true
+    number-figures: true
+    code-fold: true
+    code-tools: true
+    code-summary: "Show Code"
+    embed-resources: true
+    theme: darkly
+execute:
+  eval: true
+  message: false
+  warning: false
+editor:
+  markdown:
+    wrap: sentence
+---
+
+# Introduction
+
+This analysis examines environmental justice concerns in New Mexico by analyzing the spatial distribution of Superfund sites and their relationship to vulnerable populations.
+Using EPA's EJScreen data, we explore three key questions:
+
+1.  Where are Superfund sites concentrated across New Mexico counties?
+2.  How does proximity to Superfund sites intersect with demographic vulnerability?
+3.  What is the spatial relationship between communities of color and low-income populations?
+
+Understanding these patterns is critical for identifying communities facing disproportionate environmental burdens and informing equitable policy decisions.
+
+# Setup
+
+## Load Libraries
+
+```{r setup-libraries}
+#| message: false
+#| warning: false
+
+# Spatial data manipulation and visualization
+library(tidyverse)  # data wrangling
+library(sf)         # spatial data handling
+library(here)       # file path management
+library(tmap)       # thematic mapping
+library(spData)     # spatial datasets (US states)
+library(grid)       # viewport for inset maps
+# Bivariate mapping
+library(biscale)    # bivariate mapping
+library(ggplot2)    # general plotting
+library(cowplot)    # plot composition
+library(ggspatial)  # compass and scale bar for ggplot2
+```
+
+## Load Data
+
+```{r load-data}
+#| cache: true
+
+# Read in EPA EJScreen geodatabase (2023)
+# Data includes environmental and demographic indicators at Census Block Group level
+ejscreen <- sf::st_read(
+  here::here("data", "ejscreen", "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb"),
+  quiet = TRUE
+)
+```
+
+## Data Preparation
+
+```{r prepare-data}
+#| cache: true
+#| dependson: "load-data"
+
+# Filter to New Mexico and convert percentage fields to whole numbers
+new_mexico <- ejscreen |>
+  dplyr::filter(ST_ABBREV == "NM") |>
+  mutate(
+    # Convert decimal percentages to whole numbers for readability
+    PEOPCOLORPCT = PEOPCOLORPCT * 100,
+    LOWINCPCT = LOWINCPCT * 100
+  )
+
+# Load Native American lands data
+native_lands <- sf::st_read(
+  here::here("data", "tl_2020_us_aiannh", "tl_2020_us_aiannh.shp"),
+  quiet = TRUE
+) |>
+  st_transform(st_crs(new_mexico)) |>
+  st_intersection(st_union(new_mexico))  # Clip to New Mexico extent
+
+# Create mask for areas outside Native lands
+nm_non_native <- st_difference(
+  st_union(new_mexico),
+  st_union(native_lands)
+)
+```
+
+# Results
+
+## Superfund Site Distribution
+
+Superfund sites, officially known as National Priorities List (NPL) sites, are contaminated locations identified by the EPA as requiring long-term remediation.
+This map aggregates site counts to the county level to identify areas with the highest concentration of contaminated sites.
+
+```{r map-superfund-sites}
+#| label: fig-superfund-sites
+#| fig-cap: "**Superfund Site Distribution by County.** Superfund (NPL) site counts aggregated by county in New Mexico. The inset map shows New Mexico's location within the continental United States. Cibola County is highlighted with a thick black border."
+#| fig-width: 8
+#| fig-height: 6
+#| out-width: "100%"
+
+# Aggregate Superfund site counts to county level
+nm_counties <- new_mexico |>
+  group_by(CNTY_NAME) |>
+  summarise(total_superfund_sites = sum(NPL_CNT, na.rm = TRUE), .groups = "drop")
+
+# Main map
+tm_shape(nm_counties) +
+  tm_polygons(
+    "total_superfund_sites",
+    palette = "Reds",
+    title = "Total Number of\nSuperfund Sites",
+    border.col = "black",
+    border.alpha = 0.8,
+    lwd = 1.5
+  ) +
+  tm_shape(nm_counties |> filter(CNTY_NAME == "Cibola County")) +
+  tm_borders(col = "black", lwd = 4) +
+  tm_layout(
+    frame = FALSE,
+    legend.outside = TRUE,
+    legend.outside.position = "right",
+    outer.margins = 0
+  ) +
+  tm_compass(type = "arrow", size = 2, position = c("right", "bottom")) +
+  tm_scale_bar(text.size = 0.6, position = c("right", "bottom"))
+```
+
+## Environmental Justice Index Analysis
+
+The EPA's EJ Index combines environmental indicator data with demographic information to identify communities facing disproportionate environmental burdens.
+The Superfund Proximity EJ Index specifically measures how proximity to NPL sites intersects with vulnerable populations (low income, minority communities).
+
+```{r map-ej-index}
+#| label: fig-ej-index
+#| fig-cap: "**Environmental Justice Index for Superfund Proximity.** Superfund Proximity Environmental Justice Index by census block group in New Mexico. Red areas indicate vulnerable populations living near Superfund sites, while green areas indicate lower vulnerability or distance from sites. Cibola County is highlighted with a thick black border."
+#| fig-width: 8
+#| fig-height: 6
+#| out-width: "100%"
+
+# Get Cibola County boundary
+cibola_boundary <- new_mexico |>
+  filter(CNTY_NAME == "Cibola County") |>
+  group_by(CNTY_NAME) |>
+  summarise(geometry = st_union(Shape))
+
+# Main map
+tm_shape(new_mexico) +
+  tm_polygons(
+    "P_D2_PNPL",
+    palette = "-RdYlGn",
+    title = "Superfund Proximity\nEJ Index Percentile",
+    border.col = "gray",
+    border.alpha = 0.3,
+    legend.format = list(fun = function(x) round(x, 0))
+  ) +
+  tm_shape(cibola_boundary) +
+  tm_borders(col = "black", lwd = 4) +
+  tm_layout(
+    legend.outside = TRUE,
+    legend.frame = FALSE,
+    frame = FALSE,
+    outer.margins = 0
+  ) +
+  tm_compass(type = "arrow", size = 2, position = c("right", "bottom")) +
+  tm_scale_bar(text.size = 0.6, position = c("right", "bottom"))
+```
+
+## Focus on Cibola County: Indigenous Communities and Environmental Justice
+
+Cibola County is of particular interest as it contains significant Native American lands including portions of the Navajo Nation, Zuni Pueblo, and Acoma Pueblo.
+This zoomed-in view examines the Superfund Proximity EJ Index specifically within Cibola County, highlighting tribal lands.
+
+```{r map-cibola-ej}
+#| label: fig-cibola-ej
+#| fig-cap: "**Cibola County Environmental Justice Analysis.** Superfund Proximity EJ Index for Cibola County, with Native American tribal lands outlined in brown and filled with brown diagonal hatching to emphasize Indigenous communities."
+
+# Filter to Cibola County and clip Native lands
+cibola_data <- new_mexico |> filter(CNTY_NAME == "Cibola County")
+cibola_native_lands <- st_intersection(native_lands, st_union(cibola_data))
+
+# Main Cibola County map
+tm_shape(cibola_data) +
+  tm_polygons(
+    "P_D2_PNPL",
+    palette = "-RdYlGn",
+    title = "Superfund Proximity\nEJ Index Percentile",
+    border.col = "gray",
+    border.alpha = 0.3,
+    legend.format = list(fun = function(x) round(x, 0))
+  ) +
+  tm_shape(cibola_native_lands) +
+  tm_fill(col = "brown", alpha = 0.15) +
+  tm_borders(col = "brown", lwd = 2) +
+  tm_compass(type = "arrow", size = 2, position = c("left", "top")) +
+  tm_scale_bar(text.size = 0.6, position = c("left", "top")) +
+  tm_layout(
+    legend.outside = TRUE,
+    legend.outside.position = "right",
+    legend.frame = FALSE,
+    frame = FALSE,
+    outer.margins = 0
+  ) +
+  tm_add_legend(
+    type = "fill",
+    labels = "Native American Lands",
+    col = "brown",
+    alpha = 0.15,
+    border.col = "brown",
+    border.lwd = 2
+  )
+```
+
+## Demographic Vulnerability Patterns
+
+To further understand environmental justice implications, we examine the spatial overlap between communities of color and low-income populations using bivariate mapping.
+This technique allows us to visualize two variables simultaneously.
+
+```{r map-bivariate-demographics}
+#| label: fig-bivariate-demographics
+#| fig-cap: "**Demographic Vulnerability Patterns.** Bivariate choropleth map showing the spatial overlap of people of color percentage and low-income percentage across New Mexico census block groups. Darker purple areas indicate census tracts with high percentages of both populations. Cibola County is highlighted with a thick black border."
+
+# Create bivariate classification
+# Divides data into 3x3 grid based on quantiles of both variables
+new_mexico_bi <- bi_class(
+  new_mexico,
+  x = PEOPCOLORPCT,
+  y = LOWINCPCT,
+  style = "quantile",
+  dim = 3
+)
+
+# Get Cibola County boundary from bivariate data
+cibola_bi <- new_mexico_bi |>
+  filter(CNTY_NAME == "Cibola County") |>
+  group_by(CNTY_NAME) |>
+  summarise(geometry = st_union(Shape))
+
+# Create bivariate choropleth map
+map_bivariate <- ggplot() +
+  geom_sf(
+    data = new_mexico_bi,
+    aes(fill = bi_class),
+    color = "gray",
+    size = 0.1,
+    show.legend = FALSE
+  ) +
+  bi_scale_fill(pal = "DkViolet", dim = 3) +
+  # Add Cibola County highlight
+  geom_sf(
+    data = cibola_bi,
+    fill = NA,
+    color = "black",
+    size = 1.5
+  ) +
+  bi_theme() +
+  annotation_north_arrow(
+    location = "br",
+    which_north = "true",
+    style = north_arrow_fancy_orienteering,
+    pad_x = unit(0.2, "in"),
+    pad_y = unit(0.5, "in")
+  ) +
+  annotation_scale(
+    location = "br",
+    width_hint = 0.2,
+    pad_x = unit(0.2, "in"),
+    pad_y = unit(0.2, "in")
+  )
+
+# Create custom bivariate legend
+legend_bivariate <- bi_legend(
+  pal = "DkViolet",
+  dim = 3,
+  xlab = "People of\nColor %",
+  ylab = "Low\nIncome %",
+  size = 7
+)
+
+# Combine map and legend into single plot
+# Shift legend further right to avoid overlap
+final_plot <- ggdraw() +
+  draw_plot(map_bivariate, 0, 0, 0.8, 1) +
+  draw_plot(legend_bivariate, 0.8, 0.35, 0.2, 0.25)
+
+# Display
+final_plot
+```
+
+# Conclusions
+
+This analysis reveals important patterns in environmental justice across New Mexico, a state with a significant history of uranium mining and nuclear weapons testing. Superfund sites are unevenly distributed across counties, with some areas—particularly Cibola County—bearing a disproportionate burden of contaminated sites. This uneven distribution reflects New Mexico's legacy as a center of Cold War-era nuclear activities, including the 1945 Trinity test (the world's first atomic bomb detonation) and extensive uranium mining operations that have left lasting environmental contamination. The EJ Index analysis highlights communities at heightened risk, showing where vulnerable populations live in close proximity to Superfund sites. These areas warrant priority attention for remediation efforts, health monitoring, and community engagement. 
+
+Cibola County emerges as a critical area of concern, where environmental burdens intersect with Indigenous communities on tribal lands including portions of the Navajo Nation, Zuni Pueblo, and Acoma Pueblo. Higher EJ Index percentiles within or adjacent to these tribal lands indicate that Native American communities face disproportionate exposure to Superfund sites—a pattern consistent with the documented history of uranium mining on and near tribal lands, which has resulted in long-term health impacts and environmental degradation in Indigenous communities. Furthermore, the bivariate demographic analysis reveals that many census block groups experience compounded vulnerability, with both high percentages of people of color and low-income residents potentially facing multiple environmental stressors. These overlapping demographic vulnerabilities suggest that environmental justice concerns extend beyond simple proximity to contamination, encompassing systemic patterns of inequality that place marginalized communities at greater risk.
+
+# Data Citation
+
+**EPA EJScreen Data (2023)**
+
+U.S. Environmental Protection Agency.
+(2023).
+*EJScreen: Environmental Justice Screening and Mapping Tool* (Version 2023).
+Retrieved from <https://www.epa.gov/ejscreen>
+
+-   **Geographic Level**: Census Block Group
+-   **Temporal Coverage**: 2023
+-   **Variables Used**: NPL_CNT (Superfund site count), P_D2_PNPL (Superfund Proximity EJ Index), PEOPCOLORPCT (People of Color percentage), LOWINCPCT (Low Income percentage)
+-   **Projection**: WGS84
+
+**U.S. Census Bureau TIGER/Line Shapefiles (2020)**
+
+U.S. Census Bureau.
+(2020).
+*TIGER/Line Shapefiles: American Indian/Alaska Native/Native Hawaiian Areas*.
+Retrieved from <https://www.census.gov/cgi-bin/geo/shapefiles/index.php?year=2020&layergroup=American+Indian+Area+Geography>
+
+-   **Geographic Level**: American Indian/Alaska Native/Native Hawaiian Areas
+-   **Temporal Coverage**: 2020
+-   **Variables Used**: Tribal land boundaries
+-   **Projection**: NAD83
