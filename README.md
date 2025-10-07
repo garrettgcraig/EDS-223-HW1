@@ -7,7 +7,7 @@ This project analyzes environmental justice concerns in New Mexico by examining 
 ## Repository Contents
 
 ```
-EDS223-HW1/
+EDS-223-HW1/
 ├── ej_screen.qmd          # Main Quarto analysis document
 ├── ej_screen.html         # Rendered HTML output
 ├── data/                  # Data files (not tracked in git)
@@ -44,7 +44,7 @@ install.packages(c("tidyverse", "sf", "here", "tmap", "spData",
 ### Running the Analysis
 1. Clone this repository:
    ```bash
-   git clone https://github.com/garrettgcraig/EDS223-HW1.git
+   git clone https://github.com/garrettgcraig/EDS-223-HW1.git
    ```
 2. Download required datasets (see Data Access section)
 3. Open `ej_screen.qmd` in RStudio
